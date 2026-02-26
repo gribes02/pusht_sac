@@ -8,9 +8,9 @@ The agent controls a circular end-effector and must push a T-shaped block into a
 
 ## Demo
 
-<video src="assets/rl-video-solve1.mp4" width="480" controls></video>
+https://github.com/user-attachments/assets/3c944e3a-549c-4453-bf5e-e0ee4fef478c
 
-<video src="assets/rl-video-solve2.mp4" width="480" controls></video>
+https://github.com/user-attachments/assets/24296df9-4467-4985-ab24-eeebf0d4a64c
 
 ---
 
