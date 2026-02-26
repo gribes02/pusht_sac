@@ -1,102 +1,124 @@
-# gym-pusht
+# PushT — SAC Training for VLA Dataset Collection
 
-A gymnasium environment PushT.
+A Soft Actor-Critic (SAC) reinforcement learning agent trained on the [PushT](https://github.com/huggingface/gym-pusht) environment. The goal is to train a high-quality policy whose rollouts can be used as a demonstration dataset for a Vision-Language-Action (VLA) model.
 
+The agent controls a circular end-effector and must push a T-shaped block into a target goal zone. The episode is solved when the block overlaps the goal by at least 95%.
 
-<img src="assets/pushT.gif" width="50%" alt="Diffusion policy on PushT env"/>
+---
 
+## Demo
+
+<video src="assets/rl-video-solve1.mp4" width="480" controls></video>
+
+<video src="assets/rl-video-solve2.mp4" width="480" controls></video>
+
+---
+
+## Results
+
+After ~900k environment steps (~3000 episodes), the policy achieves a **Mean-100 reward of ~176**, with individual episodes regularly scoring 200+. The policy reliably solves the task from random initial positions and block orientations.
+
+---
+
+## Project Structure
+
+```
+pusht_sac/
+├── train.py               # SAC training loop with checkpointing
+├── evaluate.py            # Evaluate and record the trained policy
+├── collect_dataset.py     # Collect demonstrations for VLA training
+├── requirements.txt       # Python dependencies
+├── sac/
+│   ├── agent.py           # SACAgent — actor/critic update + save/load
+│   ├── actor.py           # Gaussian policy network
+│   ├── critic.py          # Q-value network
+│   ├── replay_buffer.py   # Experience replay
+│   ├── losses.py          # Loss utilities
+│   └── utils.py           # State normalisation & action scaling
+├── env/
+│   └── pusht_wrapper.py   # Environment wrapper
+├── configs/
+│   └── sac_configs.yaml   # Hyperparameter config
+└── assets/                # Demo videos
+```
+
+---
 
 ## Installation
 
-Create a virtual environment with Python 3.10 and activate it, e.g. with [`miniconda`](https://docs.anaconda.com/free/miniconda/index.html):
+Create and activate a conda environment:
 ```bash
-conda create -y -n pusht python=3.10 && conda activate pusht
+conda create -n pusht python=3.10 -y
+conda activate pusht
 ```
 
-Install gym-pusht:
+Install dependencies:
 ```bash
-pip install gym-pusht
+pip install -r requirements.txt
+pip install torch tensorboard
 ```
 
-
-## Quick start
-
-```python
-# example.py
-import gymnasium as gym
-import gym_pusht
-
-env = gym.make("gym_pusht/PushT-v0", render_mode="human")
-observation, info = env.reset()
-
-for _ in range(1000):
-    action = env.action_space.sample()
-    observation, reward, terminated, truncated, info = env.step(action)
-    image = env.render()
-
-    if terminated or truncated:
-        observation, info = env.reset()
-
-env.close()
+For video recording:
+```bash
+conda install -c conda-forge ffmpeg -y
 ```
 
-## Description
+---
 
-PushT environment.
+## Training
 
-The goal of the agent is to push the block to the goal zone. The agent is a circle and the block is a tee shape.
-
-### Action Space
-
-The action space is continuous and consists of two values: [x, y]. The values are in the range [0, 512] and
-represent the target position of the agent.
-
-### Observation Space
-
-If `obs_type` is set to `state`, the observation space is a 5-dimensional vector representing the state of the
-environment: [agent_x, agent_y, block_x, block_y, block_angle]. The values are in the range [0, 512] for the agent
-and block positions and [0, 2*pi] for the block angle.
-
-If `obs_type` is set to `pixels`, the observation space is a 96x96 RGB image of the environment.
-
-### Rewards
-
-The reward is the coverage of the block in the goal zone. The reward is 1.0 if the block is fully in the goal zone.
-
-### Success Criteria
-
-The environment is considered solved if the block is at least 95% in the goal zone.
-
-### Starting State
-
-The agent starts at a random position and the block starts at a random position and angle.
-
-### Episode Termination
-
-The episode terminates when the block is at least 95% in the goal zone.
-
-### Arguments
-
-```python
->>> import gymnasium as gym
->>> import gym_pusht
->>> env = gym.make("gym_pusht/PushT-v0", obs_type="state", render_mode="rgb_array")
->>> env
-<TimeLimit<OrderEnforcing<PassiveEnvChecker<PushTEnv<gym_pusht/PushT-v0>>>>>
+```bash
+python train.py
 ```
 
-* `obs_type`: (str) The observation type. Can be either `state`, `environment_state_agent_pos`, `pixels` or `pixels_agent_pos`. Default is `state`.
+Trains for 3000 episodes by default. Checkpoints are saved every 100 episodes to `checkpoints/`. Training auto-resumes from the last checkpoint if one exists. Set `resume=False` in `train.py` to start from scratch.
 
-* `block_cog`: (tuple) The center of gravity of the block if different from the center of mass. Default is `None`.
+Monitor training in TensorBoard:
+```bash
+tensorboard --logdir=logs --port=6006
+```
 
-* `damping`: (float) The damping factor of the environment if different from 0. Default is `None`.
+Key metrics logged:
+- `Reward/episode` — per-episode reward
+- `Reward/mean_100` — rolling mean over the last 100 episodes
+- `Loss/actor`, `Loss/critic1`, `Loss/critic2`
+- `Alpha` — entropy temperature
+- `Q/mean_q1`, `Q/mean_q2` — mean Q-values
+- `Policy/log_prob` — policy entropy
 
-* `render_mode`: (str) The rendering mode. Can be either `human` or `rgb_array`. Default is `rgb_array`.
+---
 
-* `observation_width`: (int) The width of the observed image. Default is `96`.
+## Evaluation
 
-* `observation_height`: (int) The height of the observed image. Default is `96`.
+```bash
+python evaluate.py
+```
 
-* `visualization_width`: (int) The width of the visualized image. Default is `680`.
+Loads the checkpoint from `checkpoints/` and runs the deterministic policy. Videos of each episode are saved to `videos/`.
 
-* `visualization_height`: (int) The height of the visualized image. Default is `680`.
+---
+
+## SAC Hyperparameters
+
+| Parameter | Value |
+|---|---|
+| Hidden dim | 256 |
+| Learning rate | 3e-4 |
+| Discount (γ) | 0.99 |
+| Soft update (τ) | 0.005 |
+| Batch size | 256 |
+| Replay buffer | 1M transitions |
+| Start steps (random exploration) | 5000 |
+| Target entropy | −dim(A) = −2 |
+| Gradient clip norm | 1.0 |
+| Reward scaling | ÷ 100 |
+
+---
+
+## Environment
+
+- **Library:** `gym-pusht`  
+- **Obs type:** `state` — `[agent_x, agent_y, block_x, block_y, block_angle]`, normalised to `[-1, 1]`  
+- **Action space:** `[x, y]` target position, scaled from `[-1, 1]` → `[0, 512]`  
+- **Reward:** Coverage of block in goal zone (0–1 per step, accumulated per episode)  
+- **Success:** ≥ 95% block–goal overlap

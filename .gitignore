@@ -1,1 +1,16 @@
 sac/__pycache__
+__pycache__/
+*.pyc
+
+# TensorBoard logs (can be very large)
+logs/
+
+# Training checkpoints
+checkpoints/
+
+# Recorded evaluation videos
+videos/
+
+# Python / conda env
+.venv/
+*.egg-info/

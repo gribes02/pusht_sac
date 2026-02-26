@@ -29,8 +29,8 @@ class SACAgent:
         self.gamma = 0.99
         self.tau = 0.005
 
-        # Auto entropy tuning
-        self.target_entropy = -0.5 * float(action_dim)  # -dim(A)
+        # Auto entropy tuning — standard SAC target: -dim(A)
+        self.target_entropy = -float(action_dim)
         self.log_alpha = torch.zeros(1, requires_grad=True)
         self.alpha = self.log_alpha.exp().item()
         self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=3e-4)
@@ -67,12 +67,13 @@ class SACAgent:
         loss_critic2 = self.critic_loss(q2, y)
 
         self.critic1_optimizer.zero_grad()
-        self.critic2_optimizer.zero_grad()
-        
         loss_critic1.backward()
-        loss_critic2.backward()
-
+        torch.nn.utils.clip_grad_norm_(self.critic1.parameters(), max_norm=1.0)
         self.critic1_optimizer.step()
+
+        self.critic2_optimizer.zero_grad()
+        loss_critic2.backward()
+        torch.nn.utils.clip_grad_norm_(self.critic2.parameters(), max_norm=1.0)
         self.critic2_optimizer.step()
 
         action, log_prob = self.actor(states)
@@ -86,6 +87,7 @@ class SACAgent:
 
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=1.0)
         self.actor_optimizer.step()
 
         # Update alpha
@@ -102,6 +104,9 @@ class SACAgent:
             self.writer.add_scalar('Loss/critic1', loss_critic1.item(), self.episode)
             self.writer.add_scalar('Loss/critic2', loss_critic2.item(), self.episode)
             self.writer.add_scalar('Alpha', self.alpha, self.episode)
+            self.writer.add_scalar('Q/mean_q1', q1.mean().item(), self.episode)
+            self.writer.add_scalar('Q/mean_q2', q2.mean().item(), self.episode)
+            self.writer.add_scalar('Policy/log_prob', log_prob.mean().item(), self.episode)
 
         with torch.no_grad():
             for target_param, param in zip(self.target_critic1.parameters(),
@@ -117,5 +122,38 @@ class SACAgent:
                 )
             
         self.episode += 1
-        
+
+    def save(self, path):
+        import os
+        os.makedirs(path, exist_ok=True)
+        torch.save({
+            'actor': self.actor.state_dict(),
+            'critic1': self.critic1.state_dict(),
+            'critic2': self.critic2.state_dict(),
+            'target_critic1': self.target_critic1.state_dict(),
+            'target_critic2': self.target_critic2.state_dict(),
+            'actor_optimizer': self.actor_optimizer.state_dict(),
+            'critic1_optimizer': self.critic1_optimizer.state_dict(),
+            'critic2_optimizer': self.critic2_optimizer.state_dict(),
+            'log_alpha': self.log_alpha,
+            'alpha_optimizer': self.alpha_optimizer.state_dict(),
+            'episode': self.episode,
+        }, f'{path}/checkpoint.pt')
+
+    def load(self, path):
+        ckpt = torch.load(f'{path}/checkpoint.pt', map_location='cpu')
+        self.actor.load_state_dict(ckpt['actor'])
+        self.critic1.load_state_dict(ckpt['critic1'])
+        self.critic2.load_state_dict(ckpt['critic2'])
+        self.target_critic1.load_state_dict(ckpt['target_critic1'])
+        self.target_critic2.load_state_dict(ckpt['target_critic2'])
+        self.actor_optimizer.load_state_dict(ckpt['actor_optimizer'])
+        self.critic1_optimizer.load_state_dict(ckpt['critic1_optimizer'])
+        self.critic2_optimizer.load_state_dict(ckpt['critic2_optimizer'])
+        self.log_alpha = ckpt['log_alpha']
+        self.alpha = self.log_alpha.exp().item()
+        self.alpha_optimizer = torch.optim.Adam([self.log_alpha], lr=3e-4)
+        self.alpha_optimizer.load_state_dict(ckpt['alpha_optimizer'])
+        self.episode = ckpt['episode']
+        print(f"Loaded checkpoint from {path} (update step {self.episode})")
 
